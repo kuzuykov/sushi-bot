@@ -1,7 +1,5 @@
 import asyncio
-import os
-from dotenv import load_dotenv
-
+import logging
 from aiogram import Bot, Dispatcher, Router, types, F
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
@@ -12,31 +10,53 @@ from aiogram.types import (
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram import BaseMiddleware
+from aiogram.types import Update
+from typing import Callable, Awaitable, Dict, Any
 
-# 🔐 Load .env
-load_dotenv()
-API_TOKEN = os.getenv("API_TOKEN")
-ADMIN_ID = int(os.getenv("ADMIN_ID"))
+# === CONFIG ===
+API_TOKEN = "YOUR_API_TOKEN"
+ADMIN_ID = 123456789  # replace with your actual Telegram ID
 
+# === LOGGING ===
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s"
+)
+
+# === MIDDLEWARE FOR ERROR LOGGING ===
+class ErrorLoggingMiddleware(BaseMiddleware):
+    async def __call__(
+        self,
+        handler: Callable[[Update, Dict[str, Any]], Awaitable[Any]],
+        event: Update,
+        data: Dict[str, Any]
+    ) -> Any:
+        try:
+            return await handler(event, data)
+        except Exception as e:
+            logging.exception("❌ Unhandled exception")
+            raise e
+
+# === BOT SETUP ===
 storage = MemoryStorage()
 bot = Bot(token=API_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN))
 dp = Dispatcher(storage=storage)
 router = Router()
 dp.include_router(router)
+dp.message.middleware(ErrorLoggingMiddleware())
+dp.callback_query.middleware(ErrorLoggingMiddleware())
 
+# === DATA ===
 menus = {
-    "en": {
-        "🍣 Rolls": [("Philadelphia Classic", 490), ("California Crab", 460), ("Okinawa", 410), ("Spicy Tuna", 470), ("Ebi Roll", 450)],
-        "🍱 Sets": [("Set 'Classic'", 1250), ("Set 'Big Catch'", 1950), ("Set 'Light'", 890)],
-        "🥗 Extras": [("Wasabi", 30), ("Ginger", 30), ("Soy Sauce", 30), ("Chopsticks", 0)],
-        "🥤 Drinks": [("Coca-Cola 0.5L", 100), ("Sprite 0.5L", 100), ("Mineral Water", 80), ("Iced Tea", 120)]
-    }
+    "🍣 Rolls": [("Philadelphia Classic", 490), ("California Crab", 460), ("Okinawa", 410), ("Spicy Tuna", 470), ("Ebi Roll", 450)],
+    "🍱 Sets": [("Set 'Classic'", 1250), ("Set 'Big Catch'", 1950), ("Set 'Light'", 890)],
+    "🥗 Extras": [("Wasabi", 30), ("Ginger", 30), ("Soy Sauce", 30), ("Chopsticks", 0)],
+    "🥤 Drinks": [("Coca-Cola 0.5L", 100), ("Sprite 0.5L", 100), ("Mineral Water", 80), ("Iced Tea", 120)]
 }
-
 user_data = {}
 
 class OrderState(StatesGroup):
-    lang = State()
     name = State()
     address = State()
     phone = State()
@@ -47,24 +67,24 @@ def get_main_kb():
         [KeyboardButton(text="🧾 Order"), KeyboardButton(text="✏️ Edit Cart")]
     ], resize_keyboard=True)
 
+# === HANDLERS ===
 @router.message(F.text == "/start")
 async def start(message: types.Message, state: FSMContext):
-    user_data[message.chat.id] = {"cart": [], "lang": "en"}
-    await message.answer("Welcome! Please use the menu below 👇", reply_markup=get_main_kb())
-    await state.clear()
+    user_data[message.chat.id] = {"cart": []}
+    await message.answer("Welcome! Please use the buttons below.", reply_markup=get_main_kb())
 
 @router.message(F.text == "📋 Menu")
 async def show_categories(message: types.Message):
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=category, callback_data=f"cat:{category}")]
-        for category in menus["en"]
+        for category in menus
     ])
     await message.answer("Choose category:", reply_markup=kb)
 
 @router.callback_query(F.data.startswith("cat:"))
 async def show_items(callback: types.CallbackQuery):
     category = callback.data.split("cat:")[1]
-    items = menus["en"][category]
+    items = menus[category]
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=f"{item} – {price}₴", callback_data=f"add:{item}:{price}")]
         for item, price in items
@@ -74,7 +94,8 @@ async def show_items(callback: types.CallbackQuery):
 @router.callback_query(F.data.startswith("add:"))
 async def add_item(callback: types.CallbackQuery):
     _, item, price = callback.data.split(":")
-    user_data[callback.from_user.id]["cart"].append((item, int(price)))
+    cart = user_data[callback.from_user.id]["cart"]
+    cart.append((item, int(price)))
     await callback.answer(f"{item} added ✅")
 
 @router.message(F.text == "🛒 Cart")
@@ -107,14 +128,16 @@ async def show_cart_editor(user_id, message_obj):
 @router.callback_query(F.data.startswith("remove:"))
 async def remove_item(callback: types.CallbackQuery):
     index = int(callback.data.split(":")[1])
-    removed_item = user_data[callback.from_user.id]["cart"].pop(index)[0]
+    cart = user_data[callback.from_user.id]["cart"]
+    removed_item = cart.pop(index)[0]
     await callback.answer(f"{removed_item} removed ❌")
     await callback.message.delete()
     await show_cart_editor(callback.from_user.id, callback.message)
 
 @router.message(F.text == "🧾 Order")
 async def start_order(message: types.Message, state: FSMContext):
-    if not user_data[message.chat.id]["cart"]:
+    cart = user_data[message.chat.id]["cart"]
+    if not cart:
         await message.answer("Your cart is empty.")
         return
     await message.answer("Enter your name:")
@@ -153,7 +176,9 @@ async def confirm_order(message: types.Message, state: FSMContext):
     user_data[message.chat.id]["cart"] = []
     await state.clear()
 
+# === START ===
 async def main():
+    logging.info("🚀 Bot is starting...")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
