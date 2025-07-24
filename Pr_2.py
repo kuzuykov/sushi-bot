@@ -24,12 +24,12 @@ dp = Dispatcher(storage=storage)
 router = Router()
 dp.include_router(router)
 
-# Static menu
+# Menu and category mapping
 category_map = {
     "rolls": "🍣 Rolls",
     "sets": "🍱 Sets",
     "extras": "🥗 Extras",
-    "drinks": "🥤 Drinks",
+    "drinks": "🥤 Drinks"
 }
 
 menus = {
@@ -55,9 +55,8 @@ def get_main_kb():
 
 @router.message(F.text == "/start")
 async def start(message: types.Message, state: FSMContext):
-    user_data[message.chat.id] = {"cart": []}
-    await message.answer("Welcome! Please choose an option:", reply_markup=get_main_kb())
-    await state.clear()
+    user_data[message.from_user.id] = {"cart": []}
+    await message.answer("Welcome! Please use the menu below to start ordering.", reply_markup=get_main_kb())
 
 @router.message(F.text == "📋 Menu")
 async def show_categories(message: types.Message):
@@ -65,7 +64,7 @@ async def show_categories(message: types.Message):
         [InlineKeyboardButton(text=category_map[key], callback_data=f"cat:{key}")]
         for key in category_map
     ])
-    await message.answer("Choose a category:", reply_markup=kb)
+    await message.answer("Choose category:", reply_markup=kb)
 
 @router.callback_query(F.data.startswith("cat:"))
 async def show_items(callback: types.CallbackQuery):
@@ -82,7 +81,7 @@ async def back_to_categories(callback: types.CallbackQuery):
         [InlineKeyboardButton(text=category_map[key], callback_data=f"cat:{key}")]
         for key in category_map
     ])
-    await callback.message.edit_text("Choose a category:", reply_markup=kb)
+    await callback.message.edit_text("Choose category:", reply_markup=kb)
 
 @router.callback_query(F.data.startswith("add:"))
 async def add_item(callback: types.CallbackQuery):
@@ -146,7 +145,7 @@ async def get_name(message: types.Message, state: FSMContext):
 @router.message(OrderState.address)
 async def get_address(message: types.Message, state: FSMContext):
     await state.update_data(address=message.text)
-    await message.answer("Enter your phone number:")
+    await message.answer("Enter phone number:")
     await state.set_state(OrderState.phone)
 
 @router.message(OrderState.phone)
@@ -165,10 +164,14 @@ async def confirm_order(message: types.Message, state: FSMContext):
         f"🛒 Items:\n{items}\n\n💰 Total: {total}₴"
     )
 
-    await message.answer(
-        f"✅ Your order has been placed!\n\n{summary}\n\n"
-        f"We will contact you shortly.\n\nTo place a new order, press /start"
+    user_text = (
+        f"✅ Your order has been placed!\n\n"
+        f"{summary}\n\n"
+        f"We will contact you shortly.\n\n"
+        f"To place a new order, press /start"
     )
+
+    await message.answer(user_text)
     await bot.send_message(ADMIN_ID, summary)
     user_data[message.chat.id]["cart"] = []
     await state.clear()
