@@ -1,3 +1,7 @@
-pydantic==2.4.2
-pydantic_core==2.10.1
+aiogram==3.0.0b7
+python-dotenv==1.1.1
+pydantic==1.10.13
+aiofiles==23.2.1
+aiohttp==3.9.5
+
 
