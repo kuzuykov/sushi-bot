@@ -13,7 +13,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
 
-# Load environment variables
+# 🔐 Load .env
 load_dotenv()
 API_TOKEN = os.getenv("API_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID"))
@@ -24,25 +24,19 @@ dp = Dispatcher(storage=storage)
 router = Router()
 dp.include_router(router)
 
-# Menu and category mapping
-category_map = {
-    "rolls": "🍣 Rolls",
-    "sets": "🍱 Sets",
-    "extras": "🥗 Extras",
-    "drinks": "🥤 Drinks"
-}
-
 menus = {
-    "rolls": [("Philadelphia Classic", 490), ("California Crab", 460), ("Okinawa", 410), ("Spicy Tuna", 470), ("Ebi Roll", 450)],
-    "sets": [("Set 'Classic'", 1250), ("Set 'Big Catch'", 1950), ("Set 'Light'", 890)],
-    "extras": [("Wasabi", 30), ("Ginger", 30), ("Soy Sauce", 30), ("Chopsticks", 0)],
-    "drinks": [("Coca-Cola 0.5L", 100), ("Sprite 0.5L", 100), ("Mineral Water", 80), ("Iced Tea", 120)]
+    "en": {
+        "🍣 Rolls": [("Philadelphia Classic", 490), ("California Crab", 460), ("Okinawa", 410), ("Spicy Tuna", 470), ("Ebi Roll", 450)],
+        "🍱 Sets": [("Set 'Classic'", 1250), ("Set 'Big Catch'", 1950), ("Set 'Light'", 890)],
+        "🥗 Extras": [("Wasabi", 30), ("Ginger", 30), ("Soy Sauce", 30), ("Chopsticks", 0)],
+        "🥤 Drinks": [("Coca-Cola 0.5L", 100), ("Sprite 0.5L", 100), ("Mineral Water", 80), ("Iced Tea", 120)]
+    }
 }
 
 user_data = {}
-AUDIO_URL = "https://upload.wikimedia.org/wikipedia/commons/1/14/Beep-beep.ogg"
 
 class OrderState(StatesGroup):
+    lang = State()
     name = State()
     address = State()
     phone = State()
@@ -55,41 +49,33 @@ def get_main_kb():
 
 @router.message(F.text == "/start")
 async def start(message: types.Message, state: FSMContext):
-    user_data[message.from_user.id] = {"cart": []}
-    await message.answer("Welcome! Please use the menu below to start ordering.", reply_markup=get_main_kb())
+    user_data[message.chat.id] = {"cart": [], "lang": "en"}
+    await message.answer("Welcome! Please use the menu below 👇", reply_markup=get_main_kb())
+    await state.clear()
 
 @router.message(F.text == "📋 Menu")
 async def show_categories(message: types.Message):
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=category_map[key], callback_data=f"cat:{key}")]
-        for key in category_map
+        [InlineKeyboardButton(text=category, callback_data=f"cat:{category}")]
+        for category in menus["en"]
     ])
     await message.answer("Choose category:", reply_markup=kb)
 
 @router.callback_query(F.data.startswith("cat:"))
 async def show_items(callback: types.CallbackQuery):
-    cat_key = callback.data.split(":")[1]
-    items = menus[cat_key]
-    kb = [[InlineKeyboardButton(text=f"{item} – {price}₴", callback_data=f"add:{item}:{price}")] for item, price in items]
-    kb.append([InlineKeyboardButton(text="⬅️ Back", callback_data="back")])
-    await callback.message.edit_text(f"{category_map[cat_key]}:", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
-    await bot.send_voice(callback.from_user.id, types.FSInputFile.from_url(AUDIO_URL))
-
-@router.callback_query(F.data == "back")
-async def back_to_categories(callback: types.CallbackQuery):
+    category = callback.data.split("cat:")[1]
+    items = menus["en"][category]
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=category_map[key], callback_data=f"cat:{key}")]
-        for key in category_map
+        [InlineKeyboardButton(text=f"{item} – {price}₴", callback_data=f"add:{item}:{price}")]
+        for item, price in items
     ])
-    await callback.message.edit_text("Choose category:", reply_markup=kb)
+    await callback.message.edit_text(f"{category}:\n", reply_markup=kb)
 
 @router.callback_query(F.data.startswith("add:"))
 async def add_item(callback: types.CallbackQuery):
     _, item, price = callback.data.split(":")
-    cart = user_data[callback.from_user.id]["cart"]
-    cart.append((item, int(price)))
+    user_data[callback.from_user.id]["cart"].append((item, int(price)))
     await callback.answer(f"{item} added ✅")
-    await bot.send_voice(callback.from_user.id, types.FSInputFile.from_url(AUDIO_URL))
 
 @router.message(F.text == "🛒 Cart")
 async def view_cart(message: types.Message):
@@ -112,25 +98,23 @@ async def show_cart_editor(user_id, message_obj):
         return
     total = sum(p for _, p in cart)
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"❌ {item}", callback_data=f"remove:{i}")]
+        [InlineKeyboardButton(text=f"❌ Remove {item}", callback_data=f"remove:{i}")]
         for i, (item, _) in enumerate(cart)
     ])
     msg = "\n".join([f"{i+1}. {item} – {price}₴" for i, (item, price) in enumerate(cart)])
-    await message_obj.answer(f"{msg}\n\n💰 Total: {total}₴", reply_markup=kb)
+    await message_obj.answer(f"{msg}\n\nTotal: {total}₴", reply_markup=kb)
 
 @router.callback_query(F.data.startswith("remove:"))
 async def remove_item(callback: types.CallbackQuery):
     index = int(callback.data.split(":")[1])
-    cart = user_data[callback.from_user.id]["cart"]
-    removed_item = cart.pop(index)[0]
+    removed_item = user_data[callback.from_user.id]["cart"].pop(index)[0]
     await callback.answer(f"{removed_item} removed ❌")
     await callback.message.delete()
     await show_cart_editor(callback.from_user.id, callback.message)
 
 @router.message(F.text == "🧾 Order")
 async def start_order(message: types.Message, state: FSMContext):
-    cart = user_data[message.chat.id]["cart"]
-    if not cart:
+    if not user_data[message.chat.id]["cart"]:
         await message.answer("Your cart is empty.")
         return
     await message.answer("Enter your name:")
@@ -139,7 +123,7 @@ async def start_order(message: types.Message, state: FSMContext):
 @router.message(OrderState.name)
 async def get_name(message: types.Message, state: FSMContext):
     await state.update_data(name=message.text)
-    await message.answer("Enter delivery address:")
+    await message.answer("Enter address:")
     await state.set_state(OrderState.address)
 
 @router.message(OrderState.address)
@@ -164,14 +148,7 @@ async def confirm_order(message: types.Message, state: FSMContext):
         f"🛒 Items:\n{items}\n\n💰 Total: {total}₴"
     )
 
-    user_text = (
-        f"✅ Your order has been placed!\n\n"
-        f"{summary}\n\n"
-        f"We will contact you shortly.\n\n"
-        f"To place a new order, press /start"
-    )
-
-    await message.answer(user_text)
+    await message.answer("✅ Your order has been placed!\n\n" + summary)
     await bot.send_message(ADMIN_ID, summary)
     user_data[message.chat.id]["cart"] = []
     await state.clear()
