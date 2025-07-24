@@ -1,4 +1,7 @@
 import asyncio
+import os
+from dotenv import load_dotenv
+
 from aiogram import Bot, Dispatcher, Router, types, F
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
@@ -10,8 +13,10 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
 
-API_TOKEN = "7566264545:AAGXj_fDkzeiVMdZTJqTADwxQPB6MNOwLEk"  # Replace with your actual token
-ADMIN_ID = 1329699633         # Replace with your Telegram ID
+# Load .env variables
+load_dotenv()
+API_TOKEN = os.getenv("API_TOKEN")
+ADMIN_ID = int(os.getenv("ADMIN_ID"))
 
 storage = MemoryStorage()
 bot = Bot(token=API_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN))
