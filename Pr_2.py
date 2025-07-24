@@ -24,23 +24,31 @@ dp = Dispatcher(storage=storage)
 router = Router()
 dp.include_router(router)
 
-# Menu in both languages
+# Key mapping for categories
+category_map = {
+    "rolls": {"en": "🍣 Rolls", "uk": "🍣 Роли"},
+    "sets": {"en": "🍱 Sets", "uk": "🍱 Сети"},
+    "extras": {"en": "🥗 Extras", "uk": "🥗 Додатково"},
+    "drinks": {"en": "🥤 Drinks", "uk": "🥤 Напої"},
+}
+
 menus = {
     "en": {
-        "🍣 Rolls": [("Philadelphia Classic", 490), ("California Crab", 460), ("Okinawa", 410), ("Spicy Tuna", 470), ("Ebi Roll", 450)],
-        "🍱 Sets": [("Set 'Classic'", 1250), ("Set 'Big Catch'", 1950), ("Set 'Light'", 890)],
-        "🥗 Extras": [("Wasabi", 30), ("Ginger", 30), ("Soy Sauce", 30), ("Chopsticks", 0)],
-        "🥤 Drinks": [("Coca-Cola 0.5L", 100), ("Sprite 0.5L", 100), ("Mineral Water", 80), ("Iced Tea", 120)]
+        "rolls": [("Philadelphia Classic", 490), ("California Crab", 460), ("Okinawa", 410), ("Spicy Tuna", 470), ("Ebi Roll", 450)],
+        "sets": [("Set 'Classic'", 1250), ("Set 'Big Catch'", 1950), ("Set 'Light'", 890)],
+        "extras": [("Wasabi", 30), ("Ginger", 30), ("Soy Sauce", 30), ("Chopsticks", 0)],
+        "drinks": [("Coca-Cola 0.5L", 100), ("Sprite 0.5L", 100), ("Mineral Water", 80), ("Iced Tea", 120)]
     },
     "uk": {
-        "🍣 Роли": [("Філадельфія класик", 490), ("Каліфорнія з крабом", 460), ("Окінава", 410), ("Спайсі тунець", 470), ("Ебі рол", 450)],
-        "🍱 Сети": [("Сет 'Класик'", 1250), ("Сет 'Великий улов'", 1950), ("Сет 'Лайт'", 890)],
-        "🥗 Додатково": [("Васабі", 30), ("Імбир", 30), ("Соєвий соус", 30), ("Палички", 0)],
-        "🥤 Напої": [("Кока-Кола 0.5л", 100), ("Спрайт 0.5л", 100), ("Мінералка", 80), ("Холодний чай", 120)]
+        "rolls": [("Філадельфія класик", 490), ("Каліфорнія з крабом", 460), ("Окінава", 410), ("Спайсі тунець", 470), ("Ебі рол", 450)],
+        "sets": [("Сет 'Класик'", 1250), ("Сет 'Великий улов'", 1950), ("Сет 'Лайт'", 890)],
+        "extras": [("Васабі", 30), ("Імбир", 30), ("Соєвий соус", 30), ("Палички", 0)],
+        "drinks": [("Кока-Кола 0.5л", 100), ("Спрайт 0.5л", 100), ("Мінералка", 80), ("Холодний чай", 120)]
     }
 }
 
 user_data = {}
+AUDIO_URL = "https://upload.wikimedia.org/wikipedia/commons/1/14/Beep-beep.ogg"
 
 class OrderState(StatesGroup):
     lang = State()
@@ -49,14 +57,9 @@ class OrderState(StatesGroup):
     phone = State()
 
 def get_main_kb(lang):
-    if lang == "en":
-        return ReplyKeyboardMarkup(keyboard=[
-            [KeyboardButton(text="📋 Menu"), KeyboardButton(text="🛒 Cart")],
-            [KeyboardButton(text="🧾 Order"), KeyboardButton(text="✏️ Edit Cart")]
-        ], resize_keyboard=True)
     return ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text="📋 Меню"), KeyboardButton(text="🛒 Кошик")],
-        [KeyboardButton(text="🧾 Замовити"), KeyboardButton(text="✏️ Редагувати кошик")]
+        [KeyboardButton(text="📋 Menu" if lang == "en" else "📋 Меню"), KeyboardButton(text="🛒 Cart" if lang == "en" else "🛒 Кошик")],
+        [KeyboardButton(text="🧾 Order" if lang == "en" else "🧾 Замовити"), KeyboardButton(text="✏️ Edit Cart" if lang == "en" else "✏️ Редагувати кошик")]
     ], resize_keyboard=True)
 
 @router.message(F.text == "/start")
@@ -72,28 +75,36 @@ async def start(message: types.Message, state: FSMContext):
 async def set_language(callback: types.CallbackQuery, state: FSMContext):
     lang = callback.data.split(":")[1]
     user_data[callback.from_user.id] = {"cart": [], "lang": lang}
-    await callback.message.answer("Language set ✅" if lang == "en" else "Мову встановлено ✅",
-                                  reply_markup=get_main_kb(lang))
+    await callback.message.answer("Language set ✅" if lang == "en" else "Мову встановлено ✅", reply_markup=get_main_kb(lang))
     await state.clear()
 
 @router.message(lambda msg: msg.text in ["📋 Menu", "📋 Меню"])
 async def show_categories(message: types.Message):
     lang = user_data[message.chat.id]["lang"]
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=category, callback_data=f"cat:{category}")]
-        for category in menus[lang]
+        [InlineKeyboardButton(text=category_map[key][lang], callback_data=f"cat:{key}")]
+        for key in category_map
     ])
     await message.answer("Choose category:" if lang == "en" else "Оберіть категорію:", reply_markup=kb)
 
 @router.callback_query(F.data.startswith("cat:"))
 async def show_items(callback: types.CallbackQuery):
-    category = callback.data.split("cat:")[1]
+    cat_key = callback.data.split(":")[1]
+    lang = user_data[callback.from_user.id]["lang"]
+    items = menus[lang][cat_key]
+    kb = [[InlineKeyboardButton(text=f"{item} – {price}₴", callback_data=f"add:{item}:{price}")] for item, price in items]
+    kb.append([InlineKeyboardButton(text="⬅️ Back", callback_data="back")])
+    await callback.message.edit_text(f"{category_map[cat_key][lang]}:", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
+    await bot.send_voice(callback.from_user.id, types.FSInputFile.from_url(AUDIO_URL))
+
+@router.callback_query(F.data == "back")
+async def back_to_categories(callback: types.CallbackQuery):
     lang = user_data[callback.from_user.id]["lang"]
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"{item} – {price}₴", callback_data=f"add:{item}:{price}")]
-        for item, price in menus[lang][category]]
-    )
-    await callback.message.edit_text(f"{category}:\n", reply_markup=kb)
+        [InlineKeyboardButton(text=category_map[key][lang], callback_data=f"cat:{key}")]
+        for key in category_map
+    ])
+    await callback.message.edit_text("Choose category:" if lang == "en" else "Оберіть категорію:", reply_markup=kb)
 
 @router.callback_query(F.data.startswith("add:"))
 async def add_item(callback: types.CallbackQuery):
@@ -101,6 +112,7 @@ async def add_item(callback: types.CallbackQuery):
     cart = user_data[callback.from_user.id]["cart"]
     cart.append((item, int(price)))
     await callback.answer(f"{item} added ✅")
+    await bot.send_voice(callback.from_user.id, types.FSInputFile.from_url(AUDIO_URL))
 
 @router.message(lambda msg: msg.text in ["🛒 Cart", "🛒 Кошик"])
 async def view_cart(message: types.Message):
@@ -125,11 +137,11 @@ async def show_cart_editor(user_id, message_obj):
         return
     total = sum(p for _, p in cart)
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"❌ Remove {item}", callback_data=f"remove:{i}")]
+        [InlineKeyboardButton(text=f"❌ {item}", callback_data=f"remove:{i}")]
         for i, (item, _) in enumerate(cart)
     ])
     msg = "\n".join([f"{i+1}. {item} – {price}₴" for i, (item, price) in enumerate(cart)])
-    await message_obj.answer(f"{msg}\n\nTotal: {total}₴", reply_markup=kb)
+    await message_obj.answer(f"{msg}\n\n💰 Total: {total}₴", reply_markup=kb)
 
 @router.callback_query(F.data.startswith("remove:"))
 async def remove_item(callback: types.CallbackQuery):
@@ -143,22 +155,25 @@ async def remove_item(callback: types.CallbackQuery):
 @router.message(lambda msg: msg.text in ["🧾 Order", "🧾 Замовити"])
 async def start_order(message: types.Message, state: FSMContext):
     cart = user_data[message.chat.id]["cart"]
+    lang = user_data[message.chat.id]["lang"]
     if not cart:
-        await message.answer("Your cart is empty." if user_data[message.chat.id]["lang"] == "en" else "Кошик порожній.")
+        await message.answer("Your cart is empty." if lang == "en" else "Кошик порожній.")
         return
-    await message.answer("Enter your name:" if user_data[message.chat.id]["lang"] == "en" else "Введіть ім’я:")
+    await message.answer("Enter your name:" if lang == "en" else "Введіть ім’я:")
     await state.set_state(OrderState.name)
 
 @router.message(OrderState.name)
 async def get_name(message: types.Message, state: FSMContext):
     await state.update_data(name=message.text)
-    await message.answer("Enter address:" if user_data[message.chat.id]["lang"] == "en" else "Введіть адресу:")
+    lang = user_data[message.chat.id]["lang"]
+    await message.answer("Enter address:" if lang == "en" else "Введіть адресу:")
     await state.set_state(OrderState.address)
 
 @router.message(OrderState.address)
 async def get_address(message: types.Message, state: FSMContext):
     await state.update_data(address=message.text)
-    await message.answer("Enter phone number:" if user_data[message.chat.id]["lang"] == "en" else "Введіть телефон:")
+    lang = user_data[message.chat.id]["lang"]
+    await message.answer("Enter phone number:" if lang == "en" else "Введіть телефон:")
     await state.set_state(OrderState.phone)
 
 @router.message(OrderState.phone)
